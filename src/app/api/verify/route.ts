@@ -68,24 +68,9 @@ export async function POST(request: NextRequest) {
 
     await verification.save();
 
-    // Log verification start
-    await AuditService.log('verification_started', {
-      verificationId: verification._id.toString(),
-      sellerId: seller._id.toString(),
-      sellerName: seller.name,
-      buyerEmail,
-      promiseValue: promise.price,
-      invoiceValue: invoice.price
-    }, {
-      userId: buyerEmail,
-      sellerId: seller._id.toString(),
-      verificationId: verification._id.toString(),
-      severity: 'info',
-      userAgent,
-      ipAddress
-    });
+    // Skip logging verification start - only log completion
 
-    // Perform AI verification with audit logging
+    // Perform AI verification (this will handle its own minimal logging)
     const verificationResult = await VerificationEngine.performAIVerification(
       promise, 
       invoice,
@@ -111,23 +96,28 @@ export async function POST(request: NextRequest) {
 
     const processingTime = Date.now() - startTime;
 
-    // Log verification completion
+    // Log verification completion (single comprehensive entry)
     await AuditService.log('verification_completed', {
       verificationId: verification._id.toString(),
       sellerId: seller._id.toString(),
       sellerName: seller.name,
       buyerEmail,
+      promise,
+      invoice,
       result: {
         overallScore: verificationResult.overallScore,
         mismatchCount: verificationResult.mismatches.length,
         newTrustScore,
         processingTime
       },
-      mismatches: verificationResult.mismatches.map(m => ({
-        field: m.field,
-        severity: m.severity,
-        explanation: m.explanation
-      }))
+      // Only log high/medium severity mismatches to reduce noise
+      criticalMismatches: verificationResult.mismatches
+        .filter(m => m.severity === 'high' || m.severity === 'medium')
+        .map(m => ({
+          field: m.field,
+          severity: m.severity,
+          explanation: m.explanation
+        }))
     }, {
       userId: buyerEmail,
       sellerId: seller._id.toString(),
@@ -136,23 +126,6 @@ export async function POST(request: NextRequest) {
       userAgent,
       ipAddress,
       processingTime
-    });
-
-    // Log trust score update
-    await AuditService.log('trust_score_updated', {
-      sellerId: seller._id.toString(),
-      sellerName: seller.name,
-      oldTrustScore: seller.trustScore,
-      newTrustScore,
-      verificationScore: verificationResult.overallScore,
-      totalVerifications: seller.totalVerifications + 1
-    }, {
-      userId: buyerEmail,
-      sellerId: seller._id.toString(),
-      verificationId: verification._id.toString(),
-      severity: 'info',
-      userAgent,
-      ipAddress
     });
 
     return NextResponse.json({
@@ -170,22 +143,7 @@ export async function POST(request: NextRequest) {
       },
       processingTime
     });
-  } catch (error) {
-    const processingTime = Date.now() - startTime;
-    
-    // Log system error
-    await AuditService.log('system_error', {
-      action: 'verification_system_error',
-      error: error.message,
-      stack: error.stack?.substring(0, 500),
-      processingTime
-    }, {
-      severity: 'error',
-      userAgent: request.headers.get('user-agent') || '',
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      processingTime
-    });
-    
+  } catch (error: any) {
     console.error('Error performing verification:', error);
     return NextResponse.json(
       { error: 'Failed to perform verification' },

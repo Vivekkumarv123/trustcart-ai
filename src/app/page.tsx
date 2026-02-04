@@ -28,6 +28,7 @@ import AuthDemo from '../components/AuthDemo';
 import SellerDirectory from '../components/SellerDirectory';
 import AuditLogViewer from '@/components/AuditLogViewer';
 import SellerLookup from '../components/SellerLookup';
+import OllamaStatusIndicator from '../components/OllamaStatusIndicator';
 
 export default function Home() {
   const { user, loading } = useAuth();
@@ -93,6 +94,10 @@ export default function Home() {
 
           {/* Right Actions */}
           <div className="flex items-center space-x-2 sm:space-x-6">
+            <div className="hidden sm:block">
+              <OllamaStatusIndicator />
+            </div>
+            
             <div className="hidden md:flex items-center space-x-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-full">
               <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
               <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-widest">Live: V2.0.4</span>

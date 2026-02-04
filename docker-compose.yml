@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  trustcart-app:
+    container_name: trustcart-app
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.local
+    depends_on:
+      - mongo
+      - ollama
+    restart: always
+
+  mongo:
+    container_name: trustcart-mongo
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: always
+
+  ollama:
+    container_name: trustcart-ollama
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: always
+
+volumes:
+  mongo_data:
+  ollama_data:

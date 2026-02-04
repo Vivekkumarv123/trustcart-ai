@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import { HiOutlineChevronRight, HiOutlineChevronLeft, HiOutlineShieldCheck, HiOutlineDocumentText, HiOutlineUserCircle } from 'react-icons/hi';
 import { demoPromises, demoInvoices } from '../utils/demoData';
+import { useAuth } from '../contexts/AuthContext';
 import SellerLookup from './SellerLookup';
 import SellerIdGuide from './SellerIdGuide';
 import ManualSellerInput from './ManualSellerInput';
@@ -15,6 +16,7 @@ interface VerificationFormProps { onVerificationComplete: (result: any) => void;
 interface Seller { id: string; name: string; email: string; platform: string; trustScore: number; totalVerifications: number; }
 
 export default function VerificationForm({ onVerificationComplete }: VerificationFormProps) {
+  const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [selectedSeller, setSelectedSeller] = useState<Seller | null>(null);
@@ -23,6 +25,13 @@ export default function VerificationForm({ onVerificationComplete }: Verificatio
   
   const [promise, setPromise] = useState<PromiseData>({ price: 0, deliveryCharges: 0, deliveryTime: '', returnPolicy: '', productDescription: '' });
   const [invoice, setInvoice] = useState<InvoiceData>({ price: 0, deliveryCharges: 0, deliveryTime: '', returnPolicy: '', productDescription: '', invoiceNumber: '', invoiceDate: '' });
+
+  // Auto-populate buyer email when user is authenticated
+  useEffect(() => {
+    if (user?.email && !buyerEmail) {
+      setBuyerEmail(user.email);
+    }
+  }, [user, buyerEmail]);
 
   const handlePromiseChange = (field: keyof PromiseData, value: string | number) => setPromise(prev => ({ ...prev, [field]: value }));
   const handleInvoiceChange = (field: keyof InvoiceData, value: string | number) => setInvoice(prev => ({ ...prev, [field]: value }));
@@ -99,13 +108,18 @@ export default function VerificationForm({ onVerificationComplete }: Verificatio
                 <div className="space-y-6">
                   <h3 className="text-sm font-black uppercase tracking-widest text-slate-400">Recipient Data</h3>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-widest ml-1">Buyer Email Identity</label>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-widest ml-1">
+                      Buyer Email Identity
+                      {user?.email && (
+                        <span className="text-indigo-600 font-normal ml-2">(Auto-filled)</span>
+                      )}
+                    </label>
                     <input
                       type="email"
                       value={buyerEmail}
                       onChange={(e) => setBuyerEmail(e.target.value)}
                       className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 outline-none transition-all font-medium"
-                      placeholder="identity@provider.com"
+                      placeholder={user?.email ? user.email : "identity@provider.com"}
                     />
                   </div>
                   {manualSellerInfo && !selectedSeller && (

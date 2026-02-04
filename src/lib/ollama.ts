@@ -11,7 +11,7 @@ interface VerificationPrompt {
 }
 
 export class OllamaService {
-  private static readonly OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+  private static readonly OLLAMA_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
   private static readonly MODEL = 'mistral:latest';
 
   static async generateVerificationAnalysis(prompt: VerificationPrompt): Promise<string> {
@@ -78,26 +78,44 @@ Analyze these for mismatches and provide verification results.`;
       });
 
       if (!response.ok) {
-        throw new Error(`Ollama API error: ${response.status}`);
+        // Handle specific error cases
+        if (response.status === 404) {
+          throw new Error(`Ollama model '${this.MODEL}' not found. Please run: ollama pull ${this.MODEL}`);
+        } else if (response.status === 500) {
+          throw new Error('Ollama server error. Please check if Ollama is running properly.');
+        } else {
+          throw new Error(`Ollama API error: ${response.status} - ${response.statusText}`);
+        }
       }
 
       const data: OllamaResponse = await response.json();
       return data.response;
-    } catch (error) {
-      console.error('Ollama API error:', error);
-      throw new Error('AI verification service unavailable');
+    } catch (error: any) {
+      // Don't log connection errors as they're expected when Ollama isn't running
+      if (!error.message?.includes('fetch failed') && !error.message?.includes('ECONNREFUSED')) {
+        console.error('Ollama API error:', error.message);
+      }
+      throw new Error(`AI verification service unavailable: ${error.message}`);
     }
   }
 
   static async checkOllamaStatus(): Promise<boolean> {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // Reduced timeout
+      
       const response = await fetch(`${this.OLLAMA_URL}/api/tags`, {
         method: 'GET',
-        timeout: 5000,
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
       return response.ok;
-    } catch (error) {
-      console.error('Ollama connection failed:', error);
+    } catch (error: any) {
+      // Only log if it's not a connection refused error (which is expected when Ollama isn't running)
+      if (!error.message?.includes('ECONNREFUSED') && !error.message?.includes('fetch failed')) {
+        console.error('Ollama connection failed:', error);
+      }
       return false;
     }
   }

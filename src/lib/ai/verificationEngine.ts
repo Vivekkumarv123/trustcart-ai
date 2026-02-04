@@ -80,22 +80,28 @@ export class VerificationEngine {
     let severityPenalty = 0;
     mismatches.forEach(mismatch => {
       switch (mismatch.severity) {
-        case 'high': severityPenalty += 30; break;  // Increased from 20
-        case 'medium': severityPenalty += 15; break; // Increased from 10
-        case 'low': severityPenalty += 8; break;    // Increased from 5
+        case 'high': severityPenalty += 35; break;  // Increased from 30
+        case 'medium': severityPenalty += 20; break; // Increased from 15
+        case 'low': severityPenalty += 10; break;    // Increased from 8
       }
     });
     
     // Additional penalty for multiple mismatches
     if (mismatches.length > 1) {
-      severityPenalty += mismatches.length * 5; // Extra penalty for multiple issues
+      severityPenalty += mismatches.length * 8; // Extra penalty for multiple issues
     }
     
-    // Critical field penalties
+    // Critical field penalties (warranty/return policy is critical for trust)
     const criticalFields = ['price', 'returnPolicy'];
     const criticalMismatches = mismatches.filter(m => criticalFields.includes(m.field));
     if (criticalMismatches.length > 0) {
-      severityPenalty += criticalMismatches.length * 10; // Extra penalty for critical fields
+      severityPenalty += criticalMismatches.length * 15; // Extra penalty for critical fields
+    }
+    
+    // Special penalty for warranty/return policy mismatches (these are trust-breaking)
+    const policyMismatches = mismatches.filter(m => m.field === 'returnPolicy');
+    if (policyMismatches.length > 0) {
+      severityPenalty += 25; // Additional penalty for policy breaches
     }
 
     const overallScore = Math.max(0, Math.min(100, baseScore - severityPenalty));
@@ -109,40 +115,66 @@ export class VerificationEngine {
     // Handle exact matches first
     if (policy1 === policy2) return true;
     
-    // Handle numeric policies (like "5" vs "0" days)
-    const num1 = parseFloat(policy1);
-    const num2 = parseFloat(policy2);
+    const policy1Lower = policy1.toLowerCase().trim();
+    const policy2Lower = policy2.toLowerCase().trim();
     
-    // If both are numbers, they must be exactly equal
-    if (!isNaN(num1) && !isNaN(num2)) {
-      return num1 === num2;
+    // Extract numeric values from policies (warranty months, return days, etc.)
+    const extractNumbers = (text: string): number[] => {
+      const matches = text.match(/\d+/g);
+      return matches ? matches.map(num => parseInt(num)) : [];
+    };
+    
+    const nums1 = extractNumbers(policy1Lower);
+    const nums2 = extractNumbers(policy2Lower);
+    
+    // If both policies contain numbers, compare them strictly
+    if (nums1.length > 0 && nums2.length > 0) {
+      // For warranty/return policies, the main number should match exactly
+      const mainNum1 = Math.max(...nums1); // Get the largest number (usually the warranty period)
+      const mainNum2 = Math.max(...nums2);
+      
+      // Numbers must match exactly for policies
+      if (mainNum1 !== mainNum2) {
+        return false;
+      }
     }
     
-    // Handle "no return" vs numeric policies
-    const noReturnKeywords = ['no', 'none', '0', 'zero', 'not', 'non'];
-    const policy1Lower = policy1.toLowerCase();
-    const policy2Lower = policy2.toLowerCase();
+    // Handle zero/no warranty cases
+    const zeroWarrantyKeywords = ['no warranty', 'no return', 'no refund', '0 month', '0 day', 'zero', 'none'];
+    const hasZeroWarranty1 = zeroWarrantyKeywords.some(keyword => policy1Lower.includes(keyword)) || nums1.includes(0);
+    const hasZeroWarranty2 = zeroWarrantyKeywords.some(keyword => policy2Lower.includes(keyword)) || nums2.includes(0);
     
-    const isPolicy1NoReturn = noReturnKeywords.some(keyword => policy1Lower.includes(keyword));
-    const isPolicy2NoReturn = noReturnKeywords.some(keyword => policy2Lower.includes(keyword));
-    
-    // If one is "no return" and other is a positive number, they're different
-    if (isPolicy1NoReturn !== isPolicy2NoReturn) {
+    // If one has zero warranty and other doesn't, they're different
+    if (hasZeroWarranty1 !== hasZeroWarranty2) {
       return false;
     }
     
-    // For text-based policies, use stricter similarity
-    const keywords1 = policy1Lower.split(/\s+/).filter(word => word.length > 2);
-    const keywords2 = policy2Lower.split(/\s+/).filter(word => word.length > 2);
+    // Check for warranty vs return policy type mismatches
+    const warrantyKeywords = ['warranty', 'guarantee', 'coverage'];
+    const returnKeywords = ['return', 'refund', 'exchange'];
     
-    if (keywords1.length === 0 || keywords2.length === 0) return false;
+    const isWarranty1 = warrantyKeywords.some(keyword => policy1Lower.includes(keyword));
+    const isReturn1 = returnKeywords.some(keyword => policy1Lower.includes(keyword));
+    const isWarranty2 = warrantyKeywords.some(keyword => policy2Lower.includes(keyword));
+    const isReturn2 = returnKeywords.some(keyword => policy2Lower.includes(keyword));
     
-    const commonKeywords = keywords1.filter(word => 
-      keywords2.some(word2 => word2.includes(word) || word.includes(word2))
+    // If one is warranty and other is return policy, they're different
+    if ((isWarranty1 && isReturn2) || (isReturn1 && isWarranty2)) {
+      return false;
+    }
+    
+    // For text-based policies without clear numbers, use stricter similarity
+    const words1 = policy1Lower.split(/\s+/).filter(word => word.length > 2);
+    const words2 = policy2Lower.split(/\s+/).filter(word => word.length > 2);
+    
+    if (words1.length === 0 || words2.length === 0) return false;
+    
+    const commonWords = words1.filter(word => 
+      words2.some(word2 => word === word2) // Exact word match only
     );
     
-    // Require at least 80% similarity for policies
-    return commonKeywords.length >= Math.min(keywords1.length, keywords2.length) * 0.8;
+    // Require at least 90% similarity for policies (stricter than before)
+    return commonWords.length >= Math.min(words1.length, words2.length) * 0.9;
   }
 
   private static areDescriptionsSimilar(desc1: string, desc2: string): boolean {
@@ -151,6 +183,32 @@ export class VerificationEngine {
     
     const desc1Lower = desc1.toLowerCase();
     const desc2Lower = desc2.toLowerCase();
+    
+    // Extract and compare numeric values first (critical for warranty/duration)
+    const extractNumbers = (text: string): number[] => {
+      const matches = text.match(/\d+/g);
+      return matches ? matches.map(num => parseInt(num)) : [];
+    };
+    
+    const nums1 = extractNumbers(desc1);
+    const nums2 = extractNumbers(desc2);
+    
+    // Special handling for warranty/duration numbers
+    if (nums1.length > 0 && nums2.length > 0) {
+      // Get the main warranty/duration number (usually the largest)
+      const mainNum1 = Math.max(...nums1);
+      const mainNum2 = Math.max(...nums2);
+      
+      // If warranty numbers differ significantly, it's a mismatch
+      if (Math.abs(mainNum1 - mainNum2) > 0) {
+        return false;
+      }
+    }
+    
+    // Handle cases where one has numbers and other doesn't
+    if (nums1.length !== nums2.length) {
+      return false;
+    }
     
     // Check for critical word differences that indicate different products/services
     const criticalDifferences = [
@@ -267,35 +325,8 @@ export class VerificationEngine {
     overallScore: number;
     analysis: string;
   }> {
-    const startTime = Date.now();
-    
     try {
-      // Log verification start
-      await AuditService.log('ai_analysis', {
-        action: 'verification_started',
-        promise: {
-          price: promise.price,
-          deliveryCharges: promise.deliveryCharges,
-          deliveryTime: promise.deliveryTime,
-          returnPolicy: promise.returnPolicy,
-          productDescription: promise.productDescription.substring(0, 200) // Truncate for logging
-        },
-        invoice: {
-          price: invoice.price,
-          deliveryCharges: invoice.deliveryCharges,
-          deliveryTime: invoice.deliveryTime,
-          returnPolicy: invoice.returnPolicy,
-          productDescription: invoice.productDescription.substring(0, 200)
-        }
-      }, {
-        userId: options.userId,
-        sellerId: options.sellerId,
-        verificationId: options.verificationId,
-        severity: 'info',
-        aiModel: 'mistral:latest'
-      });
-
-      // Check if Ollama is available
+      // Check if Ollama is available (without logging)
       const isOllamaAvailable = await OllamaService.checkOllamaStatus();
       
       if (isOllamaAvailable) {
@@ -306,73 +337,14 @@ export class VerificationEngine {
         });
         
         const result = OllamaService.parseVerificationResponse(aiResponse);
-        const processingTime = Date.now() - startTime;
-        
-        // Log successful AI analysis
-        await AuditService.log('ai_analysis', {
-          action: 'ai_verification_completed',
-          aiModel: 'mistral:latest',
-          processingTime,
-          result: {
-            mismatchCount: result.mismatches.length,
-            overallScore: result.overallScore,
-            analysisLength: result.analysis.length
-          },
-          rawResponse: aiResponse.substring(0, 500) // Truncate for logging
-        }, {
-          userId: options.userId,
-          sellerId: options.sellerId,
-          verificationId: options.verificationId,
-          severity: result.overallScore < 50 ? 'warning' : 'info',
-          aiModel: 'mistral:latest',
-          processingTime
-        });
-        
         return result;
       } else {
-        // Fallback to rule-based verification
-        console.warn('Ollama unavailable, falling back to rule-based verification');
-        
+        // Fallback to rule-based verification (silently)
         const result = this.performRuleBasedVerification(promise, invoice);
-        const processingTime = Date.now() - startTime;
-        
-        // Log fallback usage
-        await AuditService.log('ai_analysis', {
-          action: 'fallback_verification_used',
-          reason: 'ollama_unavailable',
-          processingTime,
-          result: {
-            mismatchCount: result.mismatches.length,
-            overallScore: result.overallScore
-          }
-        }, {
-          userId: options.userId,
-          sellerId: options.sellerId,
-          verificationId: options.verificationId,
-          severity: 'warning',
-          processingTime
-        });
-        
         return result;
       }
-    } catch (error) {
-      const processingTime = Date.now() - startTime;
-      
-      // Log error and fallback
-      await AuditService.log('system_error', {
-        action: 'ai_verification_failed',
-        error: error.message,
-        processingTime,
-        fallbackUsed: true
-      }, {
-        userId: options.userId,
-        sellerId: options.sellerId,
-        verificationId: options.verificationId,
-        severity: 'error',
-        processingTime
-      });
-      
-      console.error('AI verification failed, using rule-based fallback:', error);
+    } catch (error: any) {
+      // Always fallback to rule-based verification without logging
       return this.performRuleBasedVerification(promise, invoice);
     }
   }

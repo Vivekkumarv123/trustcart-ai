@@ -14,9 +14,20 @@ export class AuditService {
       ipAddress?: string;
       aiModel?: string;
       processingTime?: number;
+      skipErrorLogging?: boolean;
     } = {}
   ): Promise<string> {
     try {
+      // Only log meaningful verification events - just completion
+      const meaningfulActions = [
+        'verification_completed', 
+        'seller_registered'
+      ];
+      
+      if (!meaningfulActions.includes(action)) {
+        return ''; // Skip logging for non-meaningful actions
+      }
+
       await dbConnect();
 
       const auditLog = new AuditLog({
@@ -38,7 +49,7 @@ export class AuditService {
 
       await auditLog.save();
       return auditLog._id.toString();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create audit log:', error);
       // Don't throw - audit logging should not break main functionality
       return '';
@@ -120,52 +131,6 @@ export class AuditService {
         totalPages: 0,
         hasNext: false,
         hasPrev: false
-      };
-    }
-  }
-
-  static async deleteLogs(logIds: string[], userId: string): Promise<{
-    deleted: number;
-    errors: string[];
-  }> {
-    try {
-      await dbConnect();
-
-      const results = {
-        deleted: 0,
-        errors: [] as string[]
-      };
-
-      for (const logId of logIds) {
-        try {
-          const result = await AuditLog.deleteOne({ _id: logId });
-          if (result.deletedCount > 0) {
-            results.deleted++;
-            
-            // Log the deletion action
-            await this.log('system_error', {
-              action: 'audit_log_deleted',
-              deletedLogId: logId,
-              deletedBy: userId,
-              reason: 'Manual deletion'
-            }, {
-              userId,
-              severity: 'warning'
-            });
-          } else {
-            results.errors.push(`Log ${logId} not found`);
-          }
-        } catch (error) {
-          results.errors.push(`Failed to delete log ${logId}: ${error.message}`);
-        }
-      }
-
-      return results;
-    } catch (error) {
-      console.error('Failed to delete audit logs:', error);
-      return {
-        deleted: 0,
-        errors: ['Failed to delete logs: ' + error.message]
       };
     }
   }
