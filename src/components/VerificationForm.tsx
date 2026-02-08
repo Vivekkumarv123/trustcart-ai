@@ -22,6 +22,7 @@ export default function VerificationForm({ onVerificationComplete }: Verificatio
   const [selectedSeller, setSelectedSeller] = useState<Seller | null>(null);
   const [manualSellerInfo, setManualSellerInfo] = useState<{id: string; name: string} | null>(null);
   const [buyerEmail, setBuyerEmail] = useState('');
+  const [errors, setErrors] = useState<{[key: string]: string}>({});
   
   const [promise, setPromise] = useState<PromiseData>({ price: 0, deliveryCharges: 0, deliveryTime: '', returnPolicy: '', productDescription: '' });
   const [invoice, setInvoice] = useState<InvoiceData>({ price: 0, deliveryCharges: 0, deliveryTime: '', returnPolicy: '', productDescription: '', invoiceNumber: '', invoiceDate: '' });
@@ -33,13 +34,119 @@ export default function VerificationForm({ onVerificationComplete }: Verificatio
     }
   }, [user, buyerEmail]);
 
-  const handlePromiseChange = (field: keyof PromiseData, value: string | number) => setPromise(prev => ({ ...prev, [field]: value }));
-  const handleInvoiceChange = (field: keyof InvoiceData, value: string | number) => setInvoice(prev => ({ ...prev, [field]: value }));
+  const clearError = (field: string) => {
+    setErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors[field];
+      return newErrors;
+    });
+  };
+
+  const handlePromiseChange = (field: keyof PromiseData, value: string | number) => {
+    setPromise(prev => ({ ...prev, [field]: value }));
+    clearError(`promise_${field}`);
+  };
+  
+  const handleInvoiceChange = (field: keyof InvoiceData, value: string | number) => {
+    setInvoice(prev => ({ ...prev, [field]: value }));
+    clearError(`invoice_${field}`);
+  };
+
+  // Validation functions
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  const validateStep1 = (): boolean => {
+    const newErrors: {[key: string]: string} = {};
+    
+    if (!selectedSeller && !manualSellerInfo) {
+      newErrors.seller = 'Seller selection is required';
+      toast.error('Please select or enter a seller');
+    }
+    if (!buyerEmail.trim()) {
+      newErrors.buyerEmail = 'Email is required';
+      toast.error('Buyer email is required');
+    } else if (!validateEmail(buyerEmail)) {
+      newErrors.buyerEmail = 'Invalid email format';
+      toast.error('Please enter a valid email address');
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const validateStep2 = (): boolean => {
+    const newErrors: {[key: string]: string} = {};
+    
+    if (promise.price <= 0) {
+      newErrors.promise_price = 'Price must be greater than 0';
+      toast.error('Please enter a valid promised price');
+    }
+    if (promise.deliveryCharges < 0) {
+      newErrors.promise_deliveryCharges = 'Cannot be negative';
+      toast.error('Delivery charges cannot be negative');
+    }
+    if (!promise.deliveryTime.trim()) {
+      newErrors.promise_deliveryTime = 'Required field';
+      toast.error('Please specify the promised delivery time');
+    }
+    if (!promise.returnPolicy.trim()) {
+      newErrors.promise_returnPolicy = 'Required field';
+      toast.error('Please specify the return policy');
+    }
+    if (!promise.productDescription.trim()) {
+      newErrors.promise_productDescription = 'Required field';
+      toast.error('Please provide a product description');
+    } else if (promise.productDescription.trim().length < 10) {
+      newErrors.promise_productDescription = 'Too short (min 10 characters)';
+      toast.error('Product description must be at least 10 characters');
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const validateStep3 = (): boolean => {
+    const newErrors: {[key: string]: string} = {};
+    
+    if (invoice.price <= 0) {
+      newErrors.invoice_price = 'Price must be greater than 0';
+      toast.error('Please enter a valid invoice price');
+    }
+    if (invoice.deliveryCharges < 0) {
+      newErrors.invoice_deliveryCharges = 'Cannot be negative';
+      toast.error('Invoice delivery charges cannot be negative');
+    }
+    if (!invoice.deliveryTime.trim()) {
+      newErrors.invoice_deliveryTime = 'Required field';
+      toast.error('Please specify the actual delivery time');
+    }
+    if (!invoice.returnPolicy.trim()) {
+      newErrors.invoice_returnPolicy = 'Required field';
+      toast.error('Please specify the invoice return policy');
+    }
+    if (!invoice.productDescription.trim()) {
+      newErrors.invoice_productDescription = 'Required field';
+      toast.error('Please provide the invoice description');
+    } else if (invoice.productDescription.trim().length < 10) {
+      newErrors.invoice_productDescription = 'Too short (min 10 characters)';
+      toast.error('Invoice description must be at least 10 characters');
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   const handleVerification = async () => {
-    const sellerId = selectedSeller?.id || manualSellerInfo?.id;
-    if (!sellerId || !buyerEmail) { toast.error('Selection incomplete'); return; }
+    // Final validation before submission
+    if (!validateStep1() || !validateStep2() || !validateStep3()) {
+      return;
+    }
 
+    const sellerId = selectedSeller?.id || manualSellerInfo?.id;
+    
     setLoading(true);
     try {
       const response = await fetch('/api/verify', {
@@ -49,13 +156,14 @@ export default function VerificationForm({ onVerificationComplete }: Verificatio
       });
       const data = await response.json();
       if (data.success) {
-        toast.success('Analysis Complete');
+        toast.success('✅ Verification completed successfully!');
         onVerificationComplete(data);
       } else {
-        toast.error(data.error || 'Verification failed');
+        toast.error(data.error || 'Verification failed. Please try again.');
       }
     } catch (error) {
-      toast.error('Processing error');
+      console.error('Verification error:', error);
+      toast.error('Network error. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -117,10 +225,20 @@ export default function VerificationForm({ onVerificationComplete }: Verificatio
                     <input
                       type="email"
                       value={buyerEmail}
-                      onChange={(e) => setBuyerEmail(e.target.value)}
-                      className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 outline-none transition-all font-medium"
+                      onChange={(e) => {
+                        setBuyerEmail(e.target.value);
+                        clearError('buyerEmail');
+                      }}
+                      className={`w-full px-5 py-4 bg-slate-50 border rounded-2xl focus:ring-4 focus:ring-indigo-500/5 outline-none transition-all font-medium ${
+                        errors.buyerEmail 
+                          ? 'border-red-300 focus:border-red-500' 
+                          : 'border-slate-200 focus:border-indigo-500'
+                      }`}
                       placeholder={user?.email ? user.email : "identity@provider.com"}
                     />
+                    {errors.buyerEmail && (
+                      <p className="text-xs text-red-500 mt-2 ml-1 font-medium">{errors.buyerEmail}</p>
+                    )}
                   </div>
                   {manualSellerInfo && !selectedSeller && (
                     <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100 flex justify-between items-center animate-in zoom-in-95">
@@ -135,7 +253,11 @@ export default function VerificationForm({ onVerificationComplete }: Verificatio
               </div>
 
               <button
-                onClick={() => setStep(2)}
+                onClick={() => {
+                  if (validateStep1()) {
+                    setStep(2);
+                  }
+                }}
                 disabled={(!selectedSeller && !manualSellerInfo) || !buyerEmail}
                 className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black uppercase tracking-[0.2em] text-xs hover:bg-slate-800 disabled:bg-slate-100 disabled:text-slate-400 transition-all shadow-xl shadow-slate-200 flex items-center justify-center"
               >
@@ -155,30 +277,60 @@ export default function VerificationForm({ onVerificationComplete }: Verificatio
                   { label: 'Return Policy', field: 'returnPolicy', type: 'text', placeholder: 'e.g. 7 Days' },
                 ].map((input) => (
                   <div key={input.field}>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-widest ml-1">{input.label}</label>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-widest ml-1">
+                      {input.label} <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type={input.type}
                       value={(promise as any)[input.field]}
                       onChange={(e) => handlePromiseChange(input.field as any, input.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value)}
-                      className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 outline-none transition-all"
+                      className={`w-full px-5 py-4 bg-slate-50 border rounded-2xl focus:ring-4 focus:ring-indigo-500/5 outline-none transition-all ${
+                        errors[`promise_${input.field}`]
+                          ? 'border-red-300 focus:border-red-500'
+                          : 'border-slate-200 focus:border-indigo-500'
+                      }`}
                       placeholder={input.placeholder}
                     />
+                    {errors[`promise_${input.field}`] && (
+                      <p className="text-xs text-red-500 mt-1 ml-1 font-medium">{errors[`promise_${input.field}`]}</p>
+                    )}
                   </div>
                 ))}
               </div>
               <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Detailed Description</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                  Detailed Description <span className="text-red-500">*</span>
+                </label>
                 <textarea
                   value={promise.productDescription}
                   onChange={(e) => handlePromiseChange('productDescription', e.target.value)}
                   rows={4}
-                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 outline-none transition-all resize-none"
+                  className={`w-full px-5 py-4 bg-slate-50 border rounded-2xl focus:ring-4 focus:ring-indigo-500/5 outline-none transition-all resize-none ${
+                    errors.promise_productDescription
+                      ? 'border-red-300 focus:border-red-500'
+                      : 'border-slate-200 focus:border-indigo-500'
+                  }`}
                   placeholder="Paste chat message or social media caption details here..."
                 />
+                {errors.promise_productDescription && (
+                  <p className="text-xs text-red-500 mt-1 ml-1 font-medium">{errors.promise_productDescription}</p>
+                )}
+                <p className="text-[10px] text-slate-400 ml-1 mt-1">
+                  {promise.productDescription.length}/10 characters minimum
+                </p>
               </div>
               <div className="flex gap-4">
                 <button onClick={() => setStep(1)} className="flex-1 px-8 py-5 border border-slate-200 rounded-2xl font-black uppercase tracking-widest text-xs text-slate-400 hover:bg-slate-50 transition-all flex items-center justify-center"><HiOutlineChevronLeft className="mr-2" /> Back</button>
-                <button onClick={() => setStep(3)} className="flex-[2] bg-slate-900 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-slate-800 transition-all flex items-center justify-center">Evidence Phase <HiOutlineChevronRight className="ml-2" /></button>
+                <button 
+                  onClick={() => {
+                    if (validateStep2()) {
+                      setStep(3);
+                    }
+                  }}
+                  className="flex-[2] bg-slate-900 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-slate-800 transition-all flex items-center justify-center"
+                >
+                  Evidence Phase <HiOutlineChevronRight className="ml-2" />
+                </button>
               </div>
             </div>
           )}
@@ -194,27 +346,51 @@ export default function VerificationForm({ onVerificationComplete }: Verificatio
                   { label: 'Invoice Return Clause', field: 'returnPolicy', type: 'text' },
                   { label: 'Bill Serial No.', field: 'invoiceNumber', type: 'text' },
                   { label: 'Issue Date', field: 'invoiceDate', type: 'date' },
-                ].map((input) => (
-                  <div key={input.field}>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-widest ml-1">{input.label}</label>
-                    <input
-                      type={input.type}
-                      value={(invoice as any)[input.field]}
-                      onChange={(e) => handleInvoiceChange(input.field as any, input.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value)}
-                      className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                ))}
+                ].map((input) => {
+                  const isRequired = !['invoiceNumber', 'invoiceDate'].includes(input.field);
+                  return (
+                    <div key={input.field}>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-widest ml-1">
+                        {input.label} {isRequired && <span className="text-red-500">*</span>}
+                      </label>
+                      <input
+                        type={input.type}
+                        value={(invoice as any)[input.field]}
+                        onChange={(e) => handleInvoiceChange(input.field as any, input.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value)}
+                        className={`w-full px-5 py-4 bg-slate-50 border rounded-2xl focus:ring-4 focus:ring-indigo-500/5 outline-none transition-all ${
+                          errors[`invoice_${input.field}`]
+                            ? 'border-red-300 focus:border-red-500'
+                            : 'border-slate-200 focus:border-indigo-500'
+                        }`}
+                      />
+                      {errors[`invoice_${input.field}`] && (
+                        <p className="text-xs text-red-500 mt-1 ml-1 font-medium">{errors[`invoice_${input.field}`]}</p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Invoice Itemization</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                  Invoice Itemization <span className="text-red-500">*</span>
+                </label>
                 <textarea
                   value={invoice.productDescription}
                   onChange={(e) => handleInvoiceChange('productDescription', e.target.value)}
                   rows={4}
-                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 outline-none transition-all resize-none"
+                  className={`w-full px-5 py-4 bg-slate-50 border rounded-2xl focus:ring-4 focus:ring-indigo-500/5 outline-none transition-all resize-none ${
+                    errors.invoice_productDescription
+                      ? 'border-red-300 focus:border-red-500'
+                      : 'border-slate-200 focus:border-indigo-500'
+                  }`}
                   placeholder="Transcription of the physical or digital invoice..."
                 />
+                {errors.invoice_productDescription && (
+                  <p className="text-xs text-red-500 mt-1 ml-1 font-medium">{errors.invoice_productDescription}</p>
+                )}
+                <p className="text-[10px] text-slate-400 ml-1 mt-1">
+                  {invoice.productDescription.length}/10 characters minimum
+                </p>
               </div>
               <div className="flex gap-4">
                 <button onClick={() => setStep(2)} className="flex-1 px-8 py-5 border border-slate-200 rounded-2xl font-black uppercase tracking-widest text-xs text-slate-400 hover:bg-slate-50 transition-all flex items-center justify-center"><HiOutlineChevronLeft className="mr-2" /> Back</button>
